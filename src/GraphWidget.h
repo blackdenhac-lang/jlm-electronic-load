@@ -1,5 +1,7 @@
 #pragma once
 
+#include <vector> // Thêm dòng này
+#include <string> // Thêm dòng này
 #include "Adafruit_GFX.h"
 #include "WidgetBase.h"
 #include "Clock.h"

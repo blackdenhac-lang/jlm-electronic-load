@@ -3,6 +3,7 @@
 #include "Settings.h"
 #include "Program.h"
 #include "Menu.h"
+#include "State.h" 
 #include "GraphWidget.h"
 #include "LabelWidget.h"
 #include "ValueWidget.h"
@@ -82,21 +83,29 @@ enum class LowSection
 };
 static LowSection s_lowSection = LowSection::Graph;
 
-
 enum class UIState
 {
 	Main,
 	SettingsMenu,
 	GraphMenu,
+	LimitsMenu,
 	SetTarget,
-	SetTimerLimit,
 	SetVoltageLimit,
 	SetEnergyLimit,
-	SetChargeLimit	
+	SetChargeLimit,
+	SetTimeLimit
 };
 static UIState s_uiState = UIState::Main;
 
 static Menu s_menu;
+
+enum class LimitsMenuEntry {
+    Back = 0,
+    VoltageLimit,
+    EnergyLimit,
+    ChargeLimit,
+    TimeLimit
+};
 
 enum class SettingsMenuEntry
 {
@@ -244,6 +253,16 @@ void processUIState_Main()
 				s_valueEditWidget.setValue(s_measurement.getTargetResistance());
 			}
 		}
+		else if (sw == &s_limitsIconWidget) {
+			s_uiState = UIState::LimitsMenu;
+			s_menu.pushSubMenu({
+				"#f7CF7Back",
+				"#f7CF7Volt Limit",
+				"#f7CF7Energy Limit",
+				"#f7CF7Charge Limit",
+				"#f7CF7Time Limit",
+			}, 0, 120);
+		}
 	}
 }
 
@@ -299,6 +318,63 @@ static void refreshSettingsSubMenu()
 	}
 	s_menu.getSubMenuEntry((size_t)SettingsMenuEntry::Mode) = buf;
 }
+
+static void refreshLimitsSubMenu()
+{
+    char buf[64];
+    // Voltage
+    sprintf(buf, "#f7CF7Volt Limit: %.2fV [%s]", 
+            s_measurement.getVoltateLimit(), 
+            s_measurement.isVoltageLimitEnabled() ? "ON" : "OFF");
+    s_menu.getSubMenuEntry((size_t)LimitsMenuEntry::VoltageLimit) = buf;
+
+    // Energy
+    sprintf(buf, "#f7CF7Energy Lim: %.1fWh [%s]", 
+            s_measurement.getEnergyLimit(), 
+            s_measurement.isEnergyLimitEnabled() ? "ON" : "OFF");
+    s_menu.getSubMenuEntry((size_t)LimitsMenuEntry::EnergyLimit) = buf;
+
+    // Charge
+    sprintf(buf, "#f7CF7Charge Lim: %.2fAh [%s]", 
+            s_measurement.getChargeLimit(), 
+            s_measurement.isChargeLimitEnabled() ? "ON" : "OFF");
+    s_menu.getSubMenuEntry((size_t)LimitsMenuEntry::ChargeLimit) = buf;
+
+    // Time
+    Clock::duration t = s_measurement.getLoadTimerLimit();
+    int h = std::chrono::duration_cast<std::chrono::hours>(t).count();
+    int m = std::chrono::duration_cast<std::chrono::minutes>(t).count() % 60;
+    sprintf(buf, "#f7CF7Time Limit: %02d:%02d [%s]", h, m,
+            s_measurement.isLoadTimerLimitEnabled() ? "ON" : "OFF");
+    s_menu.getSubMenuEntry((size_t)LimitsMenuEntry::TimeLimit) = buf;
+}
+
+void processUIState_LimitsMenu()
+{
+    refreshLimitsSubMenu();
+    LimitsMenuEntry selection = (LimitsMenuEntry)s_menu.process(s_knob);
+
+    if (selection == LimitsMenuEntry::Back) {
+        s_uiState = UIState::Main;
+        s_menu.popSubMenu();
+    }
+    else if (selection == LimitsMenuEntry::VoltageLimit) {
+        // Nếu nhấn nhanh thì bật/tắt, nếu nhấn giữ (hoặc tùy logic) thì vào chỉnh số
+        // Ở đây tôi mặc định: Vào thẳng màn hình chỉnh số
+        s_uiState = UIState::SetVoltageLimit;
+        s_valueEditWidget.setRange(0, 30);
+        s_valueEditWidget.setValue(s_measurement.getVoltateLimit());
+        s_valueEditWidget.setSuffix("V");
+        s_valueEditWidget.setEditing(true);
+    }
+    else if (selection == LimitsMenuEntry::TimeLimit) {
+        s_uiState = UIState::SetTimeLimit;
+        s_durationLimitWidget.setDuration(s_measurement.getLoadTimerLimit());
+        s_durationLimitWidget.setEditing(true);
+    }
+    // ... bạn có thể thêm cho Energy và Charge tương tự
+}
+
 void processUIState_SettingsMenu()
 {
 	Measurement::TrackingMode mode = s_measurement.getTrackingMode();
@@ -325,6 +401,11 @@ void processUIState_SettingsMenu()
 									Measurement::TrackingMode::CC;
 			s_measurement.setTrackingMode(mode);
 		}
+		else if (selection == SettingsMenuEntry::StartProgram) {
+			runProgram(10);
+			s_menu.popSubMenu();
+			s_uiState = UIState::Main;
+		}
 		else if (selection == SettingsMenuEntry::Reset)
 		{
 			s_measurement.resetEnergy();
@@ -333,6 +414,11 @@ void processUIState_SettingsMenu()
 		else if (selection == SettingsMenuEntry::StopProgram)
 		{
 			stopProgram();
+			s_menu.popSubMenu();
+			s_uiState = UIState::Main;
+		}
+		else if (selection == SettingsMenuEntry::Settings) {
+			setState(State::Calibration);
 		}
 	}
 }
@@ -391,6 +477,15 @@ void processUIState_GraphMenu()
 void processMeasurementState()
 {
 	Measurement::TrackingMode mode = s_measurement.getTrackingMode();
+	Measurement::StopCondition stopReason = s_measurement.getStopCondition();
+	if (stopReason != Measurement::StopCondition::None) {
+		s_canvas.setCursor(10, 220);
+		s_canvas.setTextColor(0xF800); // Màu đỏ
+		if (stopReason == Measurement::StopCondition::VoltageLimit) 
+			s_canvas.print("STOP: LOW VOLTAGE!");
+		else if (stopReason == Measurement::StopCondition::LoadTimerLimit)
+			s_canvas.print("STOP: TIME OUT!");
+	}
 
 	if (s_button.state() == Button::State::RELEASED)
 	{
@@ -586,6 +681,32 @@ void processMeasurementState()
 	{
 		processUIState_SetTarget();
 	}
+
+    if (s_uiState == UIState::LimitsMenu) {
+        processUIState_LimitsMenu();
+    }
+    else if (s_uiState == UIState::SetVoltageLimit) {
+        EditWidget::Result res = s_valueEditWidget.process(s_knob);
+        if (res == EditWidget::Result::Ok) {
+            s_measurement.setVoltageLimit(s_valueEditWidget.getValue());
+            s_measurement.setVoltageLimitEnabled(true); // Bật giới hạn lên
+            s_uiState = UIState::LimitsMenu;
+        } else if (res == EditWidget::Result::Cancel) {
+            s_uiState = UIState::LimitsMenu;
+        }
+        s_valueEditWidget.render();
+    }
+    else if (s_uiState == UIState::SetTimeLimit) {
+        EditWidget::Result res = s_durationLimitWidget.process(s_knob);
+        if (res == EditWidget::Result::Ok) {
+            s_measurement.setLoadTimerLimit(s_durationLimitWidget.getDuration());
+            s_measurement.setLoadTimerLimitEnabled(true);
+            s_uiState = UIState::LimitsMenu;
+        } else if (res == EditWidget::Result::Cancel) {
+            s_uiState = UIState::LimitsMenu;
+        }
+        s_durationLimitWidget.render();
+    }
 
 	s_menu.render(s_canvas, 0);
 

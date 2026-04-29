@@ -86,7 +86,9 @@ void DAC8571::begin()
   i2c_master_stop(cmd);
   esp_err_t ret = i2c_master_cmd_begin(I2C_NUM_0, cmd, 1000 / portTICK_RATE_MS);
   i2c_cmd_link_delete(cmd);
-  ESP_ERROR_CHECK(ret);
+  if (ret != ESP_OK) {
+    ESP_LOGE("I2C", "DAC8571 không phản hồi!");
+  }
 
   //switch to fast mode
   /*

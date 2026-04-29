@@ -1,5 +1,6 @@
 #include "Measurement.h"
 #include "Settings.h"
+#include <cmath>
 #include "ADS1115.h"
 #include "DAC8571.h"
 #define LOG_LOCAL_LEVEL ESP_LOG_VERBOSE
@@ -10,10 +11,10 @@
 #include <algorithm>
 #include <mutex>
 #include <thread>
-
+#include <cstring>
 #define INPUT             0x01
 #define OUTPUT            0x02
-
+static const char* TAG = "MEASUREMENT";
 extern "C"
 {
 	void digitalWrite(uint8_t pin, uint8_t val);
@@ -132,12 +133,13 @@ void Measurement::init()
 
 	{
 	    i2c_config_t conf;
-	    conf.mode = I2C_MODE_MASTER;
-	    conf.sda_io_num = GPIO_NUM_21;
-	    conf.sda_pullup_en = GPIO_PULLUP_DISABLE;
-	    conf.scl_io_num = GPIO_NUM_22;
-	    conf.scl_pullup_en = GPIO_PULLUP_DISABLE;
-	    conf.master.clk_speed = 400000;
+		memset(&conf, 0, sizeof(i2c_config_t));
+		conf.mode = I2C_MODE_MASTER;
+		conf.sda_io_num = (gpio_num_t)21;
+		conf.scl_io_num = (gpio_num_t)22;
+		conf.sda_pullup_en = GPIO_PULLUP_ENABLE;
+		conf.scl_pullup_en = GPIO_PULLUP_ENABLE;
+		conf.master.clk_speed = 400000;
 	    i2c_param_config(I2C_NUM_0, &conf);
 	    ESP_ERROR_CHECK(i2c_driver_install(I2C_NUM_0, conf.mode,
 	                              0,
@@ -172,11 +174,16 @@ void Measurement::init()
 
 	{
 		ledc_timer_config_t config;
+		memset(&config, 0, sizeof(ledc_timer_config_t)); // Xóa trắng rác bộ nhớ
 		config.speed_mode = LEDC_HIGH_SPEED_MODE;
-		config.duty_resolution = ledc_timer_bit_t(k_fanBits);
+		config.duty_resolution = LEDC_TIMER_12_BIT; // 12 bits
 		config.timer_num = LEDC_TIMER_2;
-		config.freq_hz = 80000000 / k_fanPrecision;
-		ESP_ERROR_CHECK(ledc_timer_config(&config));
+		config.freq_hz = 5000;                      // Đặt cố định 5kHz cho an toàn
+		config.clk_cfg = LEDC_AUTO_CLK;             // THÊM DÒNG NÀY: Tự động chọn Clock
+		esp_err_t err = ledc_timer_config(&config);
+		if (err != ESP_OK) {
+			ESP_LOGE("FAN", "LEDC Timer Config Failed!");
+		}
 	}
 	{
 		ledc_channel_config_t config;
@@ -591,6 +598,22 @@ void Measurement::_readAdcs(bool& hasVoltage, bool& hasCurrent, bool& hasTempera
 
 	m_impl->temperatureRaw = adc1_get_raw(ADC1_CHANNEL_4) / 4096.f;
 	m_impl->temperature = (m_impl->temperature * 90.f + _computeTemperature(m_impl->temperatureRaw) * 10.f) / 100.f;
+	// --- THÊM LOGIC ĐIỀU KHIỂN QUẠT VÀO ĐÂY ---
+	float temp = m_impl->temperature;
+	float fanSpeed = 0.0f;
+
+	if (temp > 40.0f) { // Nếu trên 40 độ bắt đầu quay quạt
+		// Tính toán tốc độ quạt tuyến tính từ 40°C (0%) đến 65°C (100%)
+		fanSpeed = (temp - 40.0f) / (65.0f - 40.0f);
+		
+		if (fanSpeed > 1.0f) fanSpeed = 1.0f; // Tối đa 100%
+		if (fanSpeed < 0.2f) fanSpeed = 0.2f; // Chạy tối thiểu 20% để quạt đủ lực khởi động
+	} else {
+		fanSpeed = 0.0f; // Dưới 40 độ thì tắt quạt
+	}
+
+	_setFan(fanSpeed); 
+	// ------------------------------------------
 	hasTemperature = true;
 }
 void Measurement::setVoltageLimit(float limit)

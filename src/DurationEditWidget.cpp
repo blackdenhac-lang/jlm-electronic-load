@@ -92,6 +92,7 @@ EditWidget::Result DurationEditWidget::process(RotaryEncoder& knob)
 
         setDuration(d);
     }
+    return Result::None;
 }
 
 void DurationEditWidget::render()

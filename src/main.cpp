@@ -26,8 +26,8 @@
 #include "Fonts/SansSerif_plain_13.h"
 #include "Fonts/SansSerif_bold_13.h"
 #include "icons.h"
-
-static Adafruit_ILI9341 s_display = Adafruit_ILI9341(5, 4);
+static const char* TAG = "MAIN"; 
+static Adafruit_ILI9341 s_display = Adafruit_ILI9341(5, 4, -1);
 //static Adafruit_SSD1351 s_display(128, 128, &SPI, 5, 4, 2);
 JLMBackBuffer s_canvas(320, 240, 3, 3);
 int16_t s_windowY = 0;
@@ -113,7 +113,7 @@ void setup()
   }
 
   s_display.begin(64000000);
-  s_display.setRotation(1);
+  s_display.setRotation(3);
 //  s_display.fillRect(0, 0, s_display.width(), s_display.height(), 0xFFFF);
   s_display.fillRect(0, 0, s_display.width(), s_display.height(), 0x0);
 
@@ -215,9 +215,26 @@ void processSDCard()
 // the loop function runs over and over again forever
 void loop()
 {
-  static uint32_t lastTP = millis();
-  printf("\nD: %lu", millis() - lastTP);
-  lastTP = millis();
+  static uint32_t lastLogTP = 0;
+  if (millis() - lastLogTP >= 1000) { // Cứ mỗi 1000ms (1 giây) thì in một lần
+      lastLogTP = millis();
+
+      float v = s_measurement.getVoltage();      // Điện áp (V)
+      float i = s_measurement.getCurrent();      // Dòng tải (A)
+      float mah = s_measurement.getCharge() * 1000.0f; // Ah đổi sang mAh
+      float r = s_measurement.getResistance();   // Nội trở/Trở kháng (Ohm)
+      float p = s_measurement.getPower();        // Công suất (W)
+
+      // In ra Serial Monitor
+      printf("\n[MEASURE] V: %.3fV | I: %.3fA | P: %.2fW | Q: %.1fmAh | R: ", v, i, p, mah);
+      
+      // Nếu dòng điện quá nhỏ, nội trở sẽ không chính xác (vô cùng)
+      if (i < 0.01f || r > 10000.0f) {
+          printf("--- Ohm");
+      } else {
+          printf("%.3f Ohm", r);
+      }
+  }
 
   //s_canvas.fillScreen(0);
 

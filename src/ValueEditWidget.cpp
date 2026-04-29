@@ -1,3 +1,5 @@
+#include <cmath>
+#include <algorithm>
 #include "ValueEditWidget.h"
 #include "icons.h"
 
