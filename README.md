@@ -3,7 +3,7 @@
 This is a 0 - 4A electronic load, with a max power dissipation of 50-100W depending on the heat sink you're using.
 The schematic is here:
 https://easyeda.com/jeanlemotan/jlm-electronic-load<br/>
- https://oshwlab.com/epubv3/project_detjznyp
+ https://oshwlab.com/epubv3/project_detjznyp<br/>
 The main use-case for this load is to characterize battery discharge curves.<br/>
 <br/>
 UI and features: https://youtu.be/jkzM7wHbVtE<br/>
